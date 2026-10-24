@@ -45,7 +45,12 @@ func (b *Balancer) handleSocks5(c net.Conn) {
 	c.Write([]byte{0x05, 0x00})
 
 	var req [4]byte
-	if _, err := io.ReadFull(c, req[:]); err != nil || req[0] != 0x05 {
+	if _, err := io.ReadFull(c, req[:]); err != nil || req[0] != 0x05 || req[2] != 0 {
+		c.Close()
+		return
+	}
+	if req[1] != 0x01 { // CONNECT only; UDP ASSOCIATE comes with the TUN front-end
+		socksReply(c, repCmdUnsupported)
 		c.Close()
 		return
 	}
@@ -88,11 +93,6 @@ func (b *Balancer) handleSocks5(c net.Conn) {
 		return
 	}
 	port := int(binary.BigEndian.Uint16(p[:]))
-	if req[1] != 0x01 { // CONNECT only; UDP ASSOCIATE comes with the TUN front-end
-		socksReply(c, repCmdUnsupported)
-		c.Close()
-		return
-	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

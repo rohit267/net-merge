@@ -221,6 +221,63 @@ func TestUDPAssociateRefusedCleanly(t *testing.T) {
 	}
 }
 
+func TestSocksRejectsNonzeroReservedByte(t *testing.T) {
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go ServeSocks5(ln, NewBalancer(NewScheduler(nil)))
+
+	c, err := net.Dial("tcp4", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.SetDeadline(time.Now().Add(3 * time.Second))
+	if _, err := c.Write([]byte{5, 1, 0}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.ReadFull(c, make([]byte, 2)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Write([]byte{5, 1, 1, 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Read(make([]byte, 1)); err == nil {
+		t.Fatal("request with nonzero reserved byte was not rejected")
+	}
+}
+
+func TestUnsupportedSocksCommandDoesNotWaitForDestination(t *testing.T) {
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go ServeSocks5(ln, NewBalancer(NewScheduler(nil)))
+
+	c, err := net.Dial("tcp4", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.SetDeadline(time.Now().Add(3 * time.Second))
+	if _, err := c.Write([]byte{5, 1, 0}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.ReadFull(c, make([]byte, 2)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Write([]byte{5, 3, 0, 1}); err != nil {
+		t.Fatal(err)
+	}
+	reply := make([]byte, 10)
+	if _, err := io.ReadFull(c, reply); err != nil || reply[1] != repCmdUnsupported {
+		t.Fatalf("want unsupported-command reply, got %v err=%v", reply, err)
+	}
+}
+
 func TestHalfCloseStillDeliversReply(t *testing.T) {
 	// Target reads until EOF, then answers: breaks if the proxy tears down on first FIN.
 	ln, _ := net.Listen("tcp4", "127.0.0.1:0")
